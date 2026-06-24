@@ -1,0 +1,18 @@
+{
+  "model": "claude-sonnet-4-6",
+  "ignore": [
+    "node_modules/**",
+    ".git/**",
+    "dist/**",
+    "build/**",
+    ".next/**",
+    "coverage/**",
+    "*.min.js",
+    "*.map",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml"
+  ],
+  "maxFileSizeBytes": 100000,
+  "maxContextChars": 80000
+}

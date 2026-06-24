@@ -1,0 +1,25 @@
+{
+  "name": "mycode",
+  "version": "0.1.0",
+  "description": "Personal CLI coding assistant powered by Claude",
+  "type": "module",
+  "bin": {
+    "mycode": "./bin/mycode.js"
+  },
+  "scripts": {
+    "start": "node bin/mycode.js",
+    "dev": "node --watch bin/mycode.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "diff": "^7.0.0",
+    "dotenv": "^16.4.5",
+    "glob": "^11.0.0",
+    "inquirer": "^10.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
