@@ -14,14 +14,7 @@
  *   mycode config                                  ← print current config
  */
 
-// Load .env from the mycode install directory (where the tool lives),
-// then also try the current working directory so project-level overrides work.
-import { config as dotenvConfig } from "dotenv";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenvConfig({ path: join(__dirname, "..", ".env") });   // tool's own .env
-dotenvConfig({ path: join(process.cwd(), ".env") });     // project .env (override)
+// No API key needed — this tool talks to Ollama running locally.
 import { program } from "commander";
 import chalk from "chalk";
 import readline from "readline";

@@ -1,86 +1,116 @@
 /**
- * client.js — Anthropic API client wrapper.
+ * client.js — Local LLM client via Ollama.
  *
- * Why a wrapper instead of using the SDK directly everywhere?
- * Centralising the API call here means:
- *   1. Swapping to a different provider (OpenAI, Gemini, local Ollama) means
- *      editing ONE file, not hunting through the codebase.
- *   2. Retry logic, token counting, and error formatting live in one place.
- *   3. The rest of the code only knows about `sendMessages(messages)` → string.
+ * Ollama runs a local server at http://localhost:11434 and exposes an
+ * OpenAI-compatible REST API. No API key needed — completely free and offline.
+ *
+ * To swap models: change "model" in mycode.config.json.
+ * Popular options for 8GB VRAM:
+ *   llama3.1      — best general coding + reasoning (recommended)
+ *   mistral       — fast, good at code
+ *   codellama     — fine-tuned specifically for code
+ *   deepseek-coder — strong code model
+ *
+ * To pull a model:  ollama pull llama3.1
+ * To list models:   ollama list
  */
 
-import Anthropic from "@anthropic-ai/sdk";
 import { loadConfig } from "./config.js";
 
-let _client = null;
-
-function getClient() {
-  if (_client) return _client;
-
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "ANTHROPIC_API_KEY is not set.\n" +
-        "Add it to a .env file in your project root, or export it in your shell:\n" +
-        "  export ANTHROPIC_API_KEY=sk-ant-..."
-    );
-  }
-
-  _client = new Anthropic({ apiKey });
-  return _client;
-}
+const OLLAMA_BASE = "http://localhost:11434";
 
 /**
- * Send a conversation to the Claude API and return the assistant's text reply.
+ * Send a conversation to Ollama and stream the response to stdout.
+ * Returns the full assistant reply as a string.
  *
  * @param {Array<{role: "user"|"assistant", content: string}>} messages
- * @param {object} opts  - overrides: model, maxTokens, systemPrompt
- * @returns {Promise<string>}  assistant message text
+ * @param {object} opts
+ * @returns {Promise<string>}
  */
 export async function sendMessages(messages, opts = {}) {
   const cfg = loadConfig();
-  const client = getClient();
-
-  const model = opts.model ?? cfg.model ?? "claude-sonnet-4-6";
-  const maxTokens = opts.maxTokens ?? 8096;
+  const model = opts.model ?? cfg.model ?? "llama3.1";
   const system = opts.systemPrompt ?? buildSystemPrompt();
 
-  // Streaming gives faster perceived response for long outputs.
-  // We accumulate the stream into a single string before returning.
+  // Prepend system message in the messages array
+  const fullMessages = [
+    { role: "system", content: system },
+    ...messages,
+  ];
+
+  let response;
+  try {
+    response = await fetch(`${OLLAMA_BASE}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: fullMessages,
+        stream: true,
+      }),
+    });
+  } catch (e) {
+    throw new Error(
+      `Cannot connect to Ollama at ${OLLAMA_BASE}.\n` +
+      `Make sure Ollama is running — start it with:  ollama serve\n` +
+      `Original error: ${e.message}`
+    );
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    // Friendly message if the model isn't downloaded yet
+    if (response.status === 404 || text.includes("model") ) {
+      throw new Error(
+        `Model "${model}" not found in Ollama.\n` +
+        `Download it with:  ollama pull ${model}\n` +
+        `Or list available models with:  ollama list`
+      );
+    }
+    throw new Error(`Ollama API error ${response.status}: ${text}`);
+  }
+
+  // Ollama streams newline-delimited JSON objects
   let fullText = "";
-  process.stdout.write("\x1b[2m");                 // dim — model is "thinking"
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
 
-  const stream = client.messages.stream({
-    model,
-    max_tokens: maxTokens,
-    system,
-    messages,
-  });
+  process.stdout.write("\x1b[2m");   // dim while model is generating
 
-  for await (const event of stream) {
-    if (
-      event.type === "content_block_delta" &&
-      event.delta?.type === "text_delta"
-    ) {
-      process.stdout.write(event.delta.text);
-      fullText += event.delta.text;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value, { stream: true });
+    // Each chunk may contain multiple newline-separated JSON objects
+    for (const line of chunk.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const token = obj?.message?.content ?? "";
+        if (token) {
+          process.stdout.write(token);
+          fullText += token;
+        }
+      } catch {
+        // partial JSON line — skip
+      }
     }
   }
 
-  process.stdout.write("\x1b[0m\n");               // reset dim
+  process.stdout.write("\x1b[0m\n");  // reset dim
   return fullText;
 }
 
 /**
- * Lighter call for structured tasks (planning, one-shot answers).
- * Does NOT stream — just returns the complete response.
+ * One-shot question, no history.
  */
 export async function ask(prompt, opts = {}) {
   return sendMessages([{ role: "user", content: prompt }], opts);
 }
 
 function buildSystemPrompt() {
-  return `You are mycode, a personal CLI coding assistant running on the user's machine.
+  return `You are mycode, a personal CLI coding assistant running locally on the user's machine.
 
 You help with reading, writing, fixing, and refactoring code across real project files.
 
